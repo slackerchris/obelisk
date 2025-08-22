@@ -25,12 +25,17 @@ funnel_h      = 20;
 funnel_over   = 3;
 
 // ---------- Baffles (DIAGONAL across X) ----------
-num_baffles       = 6;
-baffle_t          = 2.8;
-baffle_angle_deg  = 15;     // slope across X (left high → right low, then flip)
-baffle_margin     = 10;     // top/bottom margin before first/after last
-y_clear_from_wall = 1.5;    // clearance from front/back walls (Y)
-x_overlap         = 0.6;    // bite into side walls so shelves fuse
+// Use Customizer sliders for easy tweaks:
+num_baffles       = 6;   // [1:12] number of shelves (used when auto_baffle_count=false)
+baffle_t          = 2.8; // [2:4] shelf thickness (mm)
+baffle_angle_deg  = 15;  // [10:25] slope across X (left high → right low, then flip)
+baffle_margin     = 10;  // [6:20] top/bottom margin before first/after last (mm)
+y_clear_from_wall = 1.5; // [0.5:3] clearance from front/back walls (Y)
+x_overlap         = 0.6; // [0.2:1.2] tiny penetration into walls to fuse
+
+// Optional auto-count: compute number of baffles from a target vertical spacing
+auto_baffle_count = false; // [false:true]
+target_spacing    = 24;    // [12:40] desired vertical spacing between shelves (mm)
 
 // ---------- helpers ----------
 module taper(wb, wt, h){ linear_extrude(h, scale=wt/wb) square([wb,wb], center=true); }
@@ -70,25 +75,36 @@ module top_funnel(){
 // ---------- DIAGONAL baffles (tilt across X, alternate) ----------
 module baffles_diagonal(){
   usable_h = (tower_h - base_clear_h) - 2*baffle_margin;
-  spacing  = usable_h / max(num_baffles,1);
+  n_baf    = auto_baffle_count ? max(1, floor(usable_h / target_spacing)) : max(1, num_baffles);
+  spacing  = usable_h / n_baf;
 
-  // size in Y (front/back) – centered with a small gap to both walls
-  len_y = chute_d - 2*y_clear_from_wall;
+  // X coverage: each baffle extends 40% of the inner width out from a side wall (alternating)
+  // Will compute per-baffle after iw_z is known.
 
-  for(i=[0:num_baffles-1]){
+  for(i=[0:n_baf-1]){
     zc   = base_clear_h + baffle_margin + spacing*(i+0.5);
     iw_z = inner_w_at_z(zc);             // inner width between side walls at this Z
 
-    // span left→right with a little bite into both side walls so it fuses
-    len_x = iw_z + 2*x_overlap;
+  // baffle length along X: extend 40% of inner width INTO the cavity, plus small wall overlap
+  inside_len_x = 0.40 * iw_z;
+  len_x = inside_len_x + x_overlap;
+
+  // span front→back (Y) from inner wall to inner wall with a small overlap to fuse
+  len_y = iw_z + 2*x_overlap;
 
     // alternate slope across X: even -> left high/right low, odd -> reverse
     sign = (i % 2 == 0) ? 1 : -1;
     tilt = sign * baffle_angle_deg;
 
-    // place shelf centered in X and Y, then tilt around Y so one side is lower
-    translate([0, 0, zc])
-      rotate([0, tilt, 0])       // <— rotate about Y to make a LEFT↔RIGHT slope
+  // attach to alternating side walls in X with a tiny penetration for fusing
+  inner_half = iw_z/2;
+  left_face  = -inner_half - x_overlap;
+  right_face =  inner_half + x_overlap;
+  x_offset = (i % 2 == 0) ? (left_face + len_x/2) : (right_face - len_x/2);
+
+  // place shelf at computed X offset, then tilt around Y so left/right slope
+  translate([x_offset, 0, zc])
+      rotate([0, tilt, 0])       // ← rotate about Y to make a LEFT↔RIGHT slope
         cube([len_x, len_y, baffle_t], center=true);
   }
 }
